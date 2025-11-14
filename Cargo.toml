@@ -1,0 +1,37 @@
+[package]
+name = "cubemoma"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+getrandom = { version = "0.3.4", features = ["std"] }
+rand = { version = "0.9.2", features = ["simd_support", "unbiased"]}
+wasm-bindgen = { version = "0.2.105", features = ["std"] }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+cubecl = { version = "0.8.1", features = ["random"] }
+
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+criterion = { version = "0.7.0", features = ["html_reports"]}
+
+[[bench]]
+name = "cpu_fp_ops"
+harness = false
+
+[features]
+default = ["cpu"]
+cpu = []
+gpu = []
+
+[target.'cfg(not(target_family = "wasm"))'.features]
+wgpu = ["cubecl/wgpu", "gpu"]
+cpu = ["cubecl/cpu"]
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+getrandom = { version = "0.3.4", features = ["std", "wasm_js"] }
+serde = { version = "1.0.228", features = ["std", "serde_derive", "derive"]}
+serde_json = { version = "1.0.145", features = ["std", "preserve_order"]}
+wasm-bindgen = { version = "0.2.105", features = ["std", "serde", "serde-serialize", "serde_json"] }

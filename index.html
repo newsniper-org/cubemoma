@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MoMA WASM Benchmark</title>
+</head>
+<body>
+    <h1>MoMA Arithmetic WASM Benchmark (CPU)</h1>
+    <button onclick="runBenchmark()">Run Benchmark</button>
+    <pre id="results"></pre>
+
+    <script type="module">
+        import init, { FpBench, generate_random_limbs } from './pkg/cubemoma.js';
+
+        async function runBenchmark() {
+            await init();
+            const bench = new FpBench();
+            const results = document.getElementById('results');
+
+            // 랜덤 데이터 (7 limbs x 2 for a, b)
+            const a_limbs = generate_random_limbs(42, 7);
+            const b_limbs = generate_random_limbs(123, 7);
+            const ntt_input = generate_random_limbs(456, 7 * 256);  // 256 elements
+
+            // mul_mod 벤치
+            let start = performance.now();
+            bench.bench_mul_mod(a_limbs, b_limbs);
+            let mul_time = performance.now() - start;
+            results.innerText += `fp_mul_mod: ${mul_time.toFixed(3)} ms\n`;
+
+            // repeated mul_mod (1000 iterations)
+            start = performance.now();
+            bench.bench_repeated_mul_mod(a_limbs, b_limbs, 1000);
+            let repeated_time = performance.now() - start;
+            results.innerText += `fp_repeated_mul_mod (1000): ${repeated_time.toFixed(3)} ms\n`;
+
+            // NTT 벤치
+            start = performance.now();
+            bench.bench_ntt(ntt_input);
+            let ntt_time = performance.now() - start;
+            results.innerText += `fp_ntt (n=256): ${ntt_time.toFixed(3)} ms\n`;
+        }
+
+        window.runBenchmark = runBenchmark;
+    </script>
+</body>
+</html>
