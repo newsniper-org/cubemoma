@@ -3,6 +3,7 @@ name = "cubemoma"
 version = "0.0.1"
 edition = "2024"
 license = "BSD-2-Clause"
+description = "A multi-word modular arithmetic library based on CubeCL"
 
 [lib]
 crate-type = ["rlib", "cdylib"]
