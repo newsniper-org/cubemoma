@@ -1,9 +1,10 @@
 [package]
 name = "cubemoma"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 license = "BSD-2-Clause"
 description = "A multi-word modular arithmetic library based on CubeCL"
+repository = "https://github.com/newsniper-org/cubemoma"
 
 [lib]
 crate-type = ["rlib", "cdylib"]
