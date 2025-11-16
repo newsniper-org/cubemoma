@@ -93,7 +93,7 @@ Run `cargo bench` for CPU benchmarks. Example results (AMD Ryzen 7 5800H, Rust n
 - fp_ntt (n=256): ~277.69 µs
 - fp_inv_mod (Fermat): ~223.33 µs
 
-WASM results (browser, post-optimization): mul_mod ~4 µs (from repeated), NTT ~4 ms – 4-5x faster than initial.
+WASM results (browser, post-optimization): mul_mod ~2 µs (from repeated), NTT ~2 ms – 8-10x faster than initial.
 
 ## Contributing
 
