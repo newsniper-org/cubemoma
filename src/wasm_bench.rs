@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 
-use crate::BigField as Fp;
+use crate::{BigField as Fp, NttPrecompute};
 
 #[wasm_bindgen]
 pub struct FpBench {
@@ -27,7 +27,7 @@ impl FpBench {
     pub fn bench_mul_mod(&self, a_limbs: &[u64], b_limbs: &[u64]) -> Vec<u64> {
         let a = Fp::new(a_limbs.try_into().unwrap());
         let b = Fp::new(b_limbs.try_into().unwrap());
-        let res = a.mul_mod(&b, &self.modulus, Some(self.mu));
+        let res = a.mul_mod(&b, &self.modulus, self.mu);
         res.limbs.to_vec()
     }
 
@@ -36,7 +36,7 @@ impl FpBench {
         let mut res = Fp::new(a_limbs.try_into().unwrap());
         let b = Fp::new(b_limbs.try_into().unwrap());
         for _ in 0..iterations {
-            res = res.mul_mod(&b, &self.modulus, Some(self.mu));
+            res = res.mul_mod(&b, &self.modulus, self.mu);
         }
         res.limbs.to_vec()
     }
@@ -44,8 +44,19 @@ impl FpBench {
     // 벤치용: NTT
     pub fn bench_ntt(&self, input_limbs: &[u64]) -> Vec<u64> {
         let mut input: Vec<Fp<7>> = input_limbs.chunks(7).map(|chunk| Fp::new(chunk.try_into().unwrap())).collect();
-        Fp::ntt(&mut input, &self.omega, &self.modulus, &self.mu);  // 기존 ntt 함수 호출
+        let precompute: NttPrecompute<7> = NttPrecompute::new(&self.omega, input.len(), &self.modulus, self.mu);
+        Fp::ntt(&mut input, &precompute, &self.modulus, &self.mu);  // 기존 ntt 함수 호출
         input.iter().flat_map(|fp| fp.limbs.to_vec()).collect()
+    }
+
+    // 벤치용: inv
+    pub fn bench_inv(&self, input_limbs: &[u64]) -> Vec<u64> {
+        let input: Fp<7> = Fp::<7>::new(input_limbs.try_into().unwrap());
+        if let Some(res) = input.inv_mod(&self.modulus, self.mu) {
+            res.limbs.to_vec()
+        } else {
+            Vec::<u64>::new()
+        }
     }
 }
 
@@ -60,4 +71,9 @@ pub fn generate_random_limbs(seed: u32, count: usize) -> Vec<u64> {
         res.push(x);
     }
     res
+}
+
+#[wasm_bindgen]
+pub fn generate_omega() -> Vec<u64> {
+    Fp::<7>::from_limb(7u64).limbs.to_vec()
 }

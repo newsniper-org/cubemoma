@@ -6,6 +6,10 @@
 #![feature(const_slice_make_iter)]
 #![feature(generic_const_exprs)]
 #![feature(const_ops)]
+#![feature(const_cmp)]
+#![feature(associated_type_defaults)]
+
+use std::{fmt::Display, ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Shl, ShlAssign, Shr, ShrAssign}};
 
 use rand::{CryptoRng, Rng};
 
@@ -13,6 +17,25 @@ use rand::{CryptoRng, Rng};
 pub const MBITS: usize = 64;
 
 pub type Limb = u64;
+
+#[derive(Debug, Clone)]
+pub enum MoMAError {
+    ZeroMSL,
+
+}
+
+impl Display for MoMAError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            MoMAError::ZeroMSL => {
+                Display::fmt("Most significant limb should not be zero.", f)
+            }
+        }
+    }
+}
+
+
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub struct BigField<const N: usize> {
@@ -66,18 +89,18 @@ impl<T: Sized> const PairSized<T, T> for (T, T) {
 
 impl<const N: usize> Default for BigField<N> {
     fn default() -> Self {
-        Self { limbs: [0u64; N] }
+        Self::zero()
     }
 }
 
 #[inline(always)]
 const fn parse_be_bytes<const N: usize>(bytes: [u8; 8 * N]) -> [u64; N] {
-    const S: usize = size_of::<u64>();
+    const S: usize = std::mem::size_of::<u64>();
     let mut result = [0u64; N];
     let mut idx = 0usize;
     while idx < N {
         let chunk: [u8; S] = *bytes[idx*S..(idx+1)*S].as_array().unwrap();
-        result[N-1 - idx] = u64::from_le_bytes(chunk);
+        result[N-1 - idx] = u64::from_be_bytes(chunk);
         idx += 1;
     }
     result
@@ -85,11 +108,11 @@ const fn parse_be_bytes<const N: usize>(bytes: [u8; 8 * N]) -> [u64; N] {
 
 #[inline(always)]
 const fn parse_le_bytes<const N: usize>(bytes: [u8; 8 * N]) -> [u64; N] {
-    const S: usize = size_of::<u64>();
+    const S: usize = std::mem::size_of::<u64>();
     let mut result = [0u64; N];
     let mut idx = 0usize;
     while idx < N {
-        let chunk: [u8; S] = *bytes[idx*S..(idx+1)*S].as_array().unwrap();
+        let chunk: [u8; S] = *bytes[idx*S..(idx+1)*S].as_array::<S>().unwrap();
         result[idx] = u64::from_le_bytes(chunk);
         idx += 1;
     }
@@ -106,8 +129,13 @@ impl<const N: usize> BigField<N> {
     }
 
     #[inline(always)]
+    pub const fn zero() -> Self {
+        Self { limbs: [0u64; N] }
+    }
+
+    #[inline(always)]
     pub fn random<R: CryptoRng + ?Sized>(rng: &mut R) -> Self {
-        let mut result = Self::default();
+        let mut result = Self::zero();
         for limb in result.limbs.iter_mut() {
             *limb = rng.random::<u64>();
         }
@@ -127,31 +155,31 @@ impl<const N: usize> BigField<N> {
     }
 
     #[inline(always)]
-    pub const fn from_limb(limb: Limb) -> Self {
-        let mut limbs: [Limb; N] = [0; N];
-        limbs[0] = limb;
-        Self {
-            limbs
+    pub const fn to_be_bytes(&self, output: &mut [u8]) {
+        let mut chunks: [[u8; 8]; N] = [[0u8; 8]; N];
+        let mut i = 0usize;
+        while i < N {
+            chunks[i] = self.limbs[N - 1 - i].to_be_bytes();
+            i += 1;
         }
+        output.copy_from_slice(chunks.as_flattened());
     }
 
     #[inline(always)]
-    pub const fn from_bilimb(bilimb: u128) -> Self {
-        let mut limbs: [Limb; N] = [0; N];
-        (limbs[0], limbs[1]) = bilimb.split_pair();
-        Self {
-            limbs
+    pub const fn to_le_bytes(&self, output: &mut [u8]) {
+        let mut chunks: [[u8; 8]; N] = [[0u8; 8]; N];
+        let mut i = 0usize;
+        while i < N {
+            chunks[i] = self.limbs[i].to_le_bytes();
+            i += 1;
         }
+        output.copy_from_slice(chunks.as_flattened());
     }
 
-    pub const fn from_bilimbs<const B: usize>(bilimbs: [u128; B]) -> Self
-    where u128: const PairSized<u64, u64> {
+    #[inline(always)]
+    pub const fn from_limb(limb: Limb) -> Self {
         let mut limbs: [Limb; N] = [0; N];
-        let mut i = 0usize;
-        while i < B {
-            (limbs[i], limbs[i+1]) = bilimbs[i].split_pair();
-            i += 2;
-        }
+        limbs[0] = limb;
         Self {
             limbs
         }
@@ -180,7 +208,7 @@ impl<const N: usize> BigField<N> {
         Self::new(result)
     }
 
-    fn add_multi(result: &mut [Limb; N], b: &[Limb; N], high: &mut Limb) {
+    pub(crate) fn add_multi(result: &mut [Limb; N], b: &[Limb; N], high: &mut Limb) {
         let mut carry = false;
         for i in 0..N {
             (result[i], carry) = result[i].carrying_add(b[i], carry)
@@ -188,6 +216,19 @@ impl<const N: usize> BigField<N> {
         if carry {
             *high += 1;
         }
+    }
+
+    pub(crate) fn add_multi_return(a: &Self, b: &Self, high: &mut Limb) -> Self {
+        let mut carry = false;
+
+        let mut result = Self::zero();
+        for i in 0..N {
+            (result.limbs[i], carry) = a.limbs[i].carrying_add(b.limbs[i], carry)
+        }
+        if carry {
+            *high += 1;
+        }
+        result
     }
 
     fn mod_multi(x: &mut [Limb; N], modulus: &[Limb; N], high: &mut Limb) {
@@ -234,8 +275,7 @@ impl<const N: usize> BigField<N> {
         }
     }
 
-    pub fn mul_mod(&self, other: &Self, modulus: &Self, pre_mu: Option<[u64; N + 1]>) -> Self {
-        let mu = pre_mu.unwrap_or(Self::precompute_mu(modulus));
+    pub fn mul_mod(&self, other: &Self, modulus: &Self, mu: [Limb; N + 1]) -> Self {
 
         // Schoolbook mul (논문 Equation 8 기반)
         let mut product: Vec<Limb> = vec![0; 2 * N];
@@ -248,7 +288,7 @@ impl<const N: usize> BigField<N> {
             }
             let mut k = i + N;
             while carry > 0 {
-                if k >= product.len() {
+                while k >= product.len() {
                     product.push(0);
                 }
                 carry += product[k] as u128;
@@ -275,36 +315,57 @@ impl<const N: usize> BigField<N> {
             r[i] = borrow as Limb;
             borrow = if borrow < 0 { 1 } else { 0 };
         }
+
+        // Remove the problematic while loop for borrow
+        // Instead, if final borrow != 0 (r negative), add modulus
         if borrow != 0 {
-            // Handle remaining borrow if necessary
-            while borrow != 0 && r.len() > 0 {
-                let last_idx = r.len() - 1;
-                borrow = r[last_idx] as i128 - borrow;
-                r[last_idx] = borrow as Limb;
-                borrow = if borrow < 0 { 1 } else { 0 };
-                if borrow != 0 {
+            let mut carry = 0u128;
+            for i in 0..N {
+                if i < r.len() {
+                    carry = carry + r[i] as u128 + modulus.limbs[i] as u128;
+                    r[i] = carry as Limb;
+                    carry >>= 64;
+                } else {
+                    break;  // No more r limbs
+                }
+            }
+            let mut k = N;
+            while carry > 0 && k < r.len() {
+                carry += r[k] as u128;
+                r[k] = carry as Limb;
+                carry >>= 64;
+                k += 1;
+            }
+            if carry > 0 {
+                while k >= r.len() {
                     r.push(0);
                 }
+                r[k] = carry as Limb;
             }
         }
 
+        // Extract low N limbs
         let mut result = [0; N];
         let res_len = std::cmp::min(r.len(), N);
         for i in 0..res_len {
             result[i] = r[i];
         }
 
-        // Conditional sub (at most twice for safety)
-        if Self::cmp_multi(&result, &modulus.limbs) != std::cmp::Ordering::Less {
-            let mut high = 0;
-            Self::sub_multi(&mut result, &modulus.limbs, &mut high);
+        // Conditional sub loop (your code is fine, but add high handling if needed)
+        let mut high = 0;
+        loop {
+            match Self::cmp_multi(&result, &modulus.limbs) {
+                std::cmp::Ordering::Greater => {
+                    Self::sub_multi(&mut result, &modulus.limbs, &mut high);
+                },
+                std::cmp::Ordering::Equal => {
+                    return Self::zero();
+                },
+                std::cmp::Ordering::Less => {
+                    return Self::new(result);
+                }
+            }
         }
-        if Self::cmp_multi(&result, &modulus.limbs) != std::cmp::Ordering::Less {
-            let mut high = 0;
-            Self::sub_multi(&mut result, &modulus.limbs, &mut high);
-        }
-
-        Self::new(result)
     }
 
     fn mul_wide(a: &[Limb], b: &[Limb]) -> Vec<Limb> {
@@ -363,93 +424,137 @@ impl<const N: usize> BigField<N> {
         }
     }
 
-    pub fn precompute_mu(modulus: &Self) -> [Limb; N + 1] {
-        // 2^{128·N} = 1 << (64 * 2 * N)
-        let mut dividend = vec![0u64; 2 * N];
-        dividend.push(1);                     // MSB = 1
+    pub fn precompute_mu(modulus: &Self) -> [Limb; N+1] where [(); 2*N+1]: {
+        let mut result: BigField<{N + 1}> = BigField::zero();
+        let mut product = BigField::zero();
+        let mut head: BigField<{N + 1}> = BigField::from_limb(1u64) << (64 * N);
+        let dividend = BigField::from_limb(1u64) << (2 * 64 * N);
+        let mut product_delta: BigField<{2 * N + 1}> = modulus.cast_to::<{2 * N + 1}>() <<  64 * N;
+        let mut high = 0u64;
 
-        let mut quot = [0u64; N + 1];         // μ (N+1 limbs)
-        let mut rem  = [0u64; N];              // remainder (N limbs)
-
-        // dividend.len() == 2·N + 1
-        for i in (0..dividend.len()).rev() {
-            // ---- 1) shift remainder left by one limb and bring in next dividend limb
-            rem.rotate_right(1);
-            rem[0] = dividend[i];
-
-            // ---- 2) estimate quotient digit q̂
-            let mut qd = if N == 0 {
-                0
-            } else if rem[N - 1] > modulus.limbs[N - 1] {
-                u64::MAX
-            } else {
-                let hi = (rem[N - 1] as u128) << 64;
-                let lo = if N >= 2 { rem[N - 2] as u128 } else { 0 };
-                ((hi | lo) / modulus.limbs[N - 1] as u128) as u64
-            };
-
-            // ---- 3) refine q̂ (at most 2 subtractions)
-            while qd > 0 {
-                let prod = Self::mul_wide(&[qd], &modulus.limbs);
-                if Self::cmp_wide(&prod, &rem.to_vec()) == std::cmp::Ordering::Greater {
-                    qd -= 1;
-                } else {
+        loop {
+            let new_result = result | head;
+            let new_product = BigField::add_multi_return(&product, &product_delta, &mut high);
+            match new_product.cmp(&dividend) {
+                std::cmp::Ordering::Less => {
+                    result = new_result;
+                    product = new_product;
+                },
+                std::cmp::Ordering::Equal => {
+                    result = new_result;
                     break;
+                },
+                std::cmp::Ordering::Greater => {
+
                 }
             }
-
-            // ---- 4) subtract q̂·p from remainder
-            let prod = Self::mul_wide(&[qd], &modulus.limbs);
-            let mut borrow = 0i128;
-            for j in 0..N {
-                let sub = if j < prod.len() { prod[j] as i128 } else { 0 };
-                borrow = rem[j] as i128 - sub - borrow;
-                rem[j] = borrow as u64;
-                borrow = if borrow < 0 { 1 } else { 0 };
-            }
-
-            // ---- 5) if under-subtracted, add p back and decrease q̂
-            if borrow > 0 {
-                qd -= 1;
-                let mut carry = 0u128;
-                for j in 0..N {
-                    carry = carry + rem[j] as u128 + modulus.limbs[j] as u128;
-                    rem[j] = carry as u64;
-                    carry >>= 64;
-                }
-            }
-
-            // ---- 6) store quotient digit
-            // dividend 의 앞쪽 N limb 은 몫에 포함되지 않는다.
-            // i ≥ N 일 때만 quot에 기록한다.
-            if i >= N {
-                let quot_idx = i - N;               // 0 … N
-                quot[quot_idx] = qd;
+            head >>= 1usize;
+            product_delta >>= 1usize;
+            if head.limbs.iter().all(|limb|*limb == 0u64) {
+                break;
             }
         }
-
-        quot
+        result.limbs
     }
 
     pub fn neg_mod(&self, modulus: &Self) -> Self {
-        modulus.sub_mod(self, modulus)
+        if self.is_zero() {
+            *self
+        } else {
+            modulus.sub_mod(self, modulus)
+        }
     }
 
-    pub fn square_mod(&self, modulus: &Self, pre_mu: Option<[u64; N + 1]>) -> Self {
-        let mu = pre_mu.unwrap_or(Self::precompute_mu(modulus));
-        self.mul_mod(self, modulus, Some(mu))
+    // sqrt_mod using Tonelli-Shanks
+    pub fn sqrt_mod(&self, modulus: &Self, mu: [Limb; N + 1]) -> Option<Self> {
+
+        if Self::legendre_symbol(self, modulus, &mu) != 1 {
+            return None; // Not quadratic residue
+        }
+
+        
+        let (one, two, four) = (Self::from_limb(1u64), Self::from_limb(2u64), Self::from_limb(4u64));
+
+        
+        if modulus.limbs[0] % 4 == 3 {
+            // Simple case for p ≡ 3 mod 4: sqrt = a^{(p+1)/4} mod p
+            let mut exp = modulus.add_mod(&Self::from_limb(1u64), modulus);
+            exp = exp.pow_mod(&four, modulus, mu).inv_mod(modulus, mu).unwrap(); // (p+1)/4
+            return Some(self.pow_mod(&exp, modulus, mu));
+        }
+
+        // General Tonelli-Shanks
+        // Step 1: Write p-1 = 2^s * q, q odd
+        let mut s = 0;
+        let mut q = modulus.sub_mod(&Self::from_limb(1u64), modulus);
+        while q.limbs[0] % 2 == 0 {
+            q = q.pow_mod(&Self::from_limb(2u64), modulus, mu).inv_mod(modulus, mu).unwrap(); // divide by 2
+            s += 1;
+        }
+
+        // Step 2: Find non-residue z
+        let mut z = two.clone();
+        while Self::legendre_symbol(&z, modulus, &mu) != -1 {
+            z = z.add_mod(&one, modulus);
+        }
+
+        // Step 3: Set c = z^q mod p, r = a^{(q+1)/2} mod p, t = a^q mod p
+        let mut c = z.pow_mod(&q, modulus, mu);
+        let mut r = self.pow_mod(&q.add_mod(&one, modulus).pow_mod(&two, modulus, mu).inv_mod(modulus, mu).unwrap(), modulus, mu);
+        let mut t = self.pow_mod(&q, modulus, mu);
+        let mut m = s;
+
+        loop {
+            if t.is_one() {
+                return Some(r); // r^2 ≡ a mod p
+            }
+
+            // Find smallest i such that t^{2^i} ≡ 1 mod p
+            let mut i = 1;
+            let mut tt = t.mul_mod(&t, modulus, mu);
+            while !tt.is_one() {
+                tt = tt.mul_mod(&tt, modulus, mu);
+                i += 1;
+            }
+
+            // b = c^{2^{m-i-1}} mod p
+            let mut b = c;
+            for _ in 0..(m - i - 1) {
+                b = b.mul_mod(&b, modulus, mu);
+            }
+
+            r = r.mul_mod(&b, modulus, mu);
+            c = b.mul_mod(&b, modulus, mu);
+            t = t.mul_mod(&c, modulus, mu);
+            m = i;
+        }
     }
 
-    pub fn pow_mod(&self, exp: &Self, modulus: &Self, pre_mu: Option<[u64; N + 1]>) -> Self {
+    pub fn legendre_symbol(a: &Self, p: &Self, mu: &[Limb; N+1]) -> i32 where [(); N+1]: {
+        // a^{(p-1)/2} mod p: 1 if QR, -1 if non-QR, 0 if a=0 mod p
+        let exp = p.sub_mod(&Self::from_limb(1u64), p) >> 1usize;
+        let res = a.pow_mod(&exp, p, *mu);
+        if res.is_zero() {
+            0
+        } else if res.is_one() {
+            1
+        } else {
+            -1
+        }
+    }
+
+    pub fn square_mod(&self, modulus: &Self, mu: [u64; N + 1]) -> Self {
+        self.mul_mod(self, modulus, mu)
+    }
+
+    pub fn pow_mod(&self, exp: &Self, modulus: &Self, mu: [u64; N + 1]) -> Self {
         let mut result = Self::from_limb(1u64);
-        let mu = pre_mu.unwrap_or(Self::precompute_mu(modulus));
 
-        for i in (0..N).rev() {
-            let limb = exp.limbs[i];
+        for &limb in exp.limbs.iter().rev() {
             for bit in (0usize..64).rev() {
-                result = result.square_mod(modulus, Some(mu));
+                result = result.square_mod(modulus, mu);
                 if (limb & (1u64 << bit)) != 0 {
-                    result = result.mul_mod(self, modulus, Some(mu));
+                    result = result.mul_mod(self, modulus, mu);
                 }
             }
         }
@@ -458,7 +563,7 @@ impl<const N: usize> BigField<N> {
 
     pub fn get_minus_two_unchecked(&self) -> Self {
         let mut borrow = false;
-        let mut result = Self::default();
+        let mut result = Self::zero();
         (result.limbs[0], borrow) = self.limbs[0].borrowing_sub(2, borrow);
         for i in 1..N {
             (result.limbs[i], borrow) = self.limbs[i].borrowing_sub(0, borrow);
@@ -466,35 +571,81 @@ impl<const N: usize> BigField<N> {
         result
     }
 
-    pub fn inv_mod(&self, modulus: &Self, pre_mu: Option<[u64; N + 1]>) -> Self {
-        let p_minus_2 = modulus.get_minus_two_unchecked();
-        let mu = pre_mu.unwrap_or(Self::precompute_mu(modulus));
-        self.pow_mod(&p_minus_2, modulus, Some(mu))
+    pub const fn is_zero(&self) -> bool {
+        let (mut result, mut i) = (true, 0usize);
+        while i < N {
+            result = result && (self.limbs[i] == 0u64);
+            i += 1;
+        }
+        result
     }
 
-    pub fn ntt(input: &mut [Self], omega: &Self /* primitive root ω for modulus p */ , modulus: &Self, mu: &[u64; N + 1]) {
+    pub const fn is_one(&self) -> bool {
+        let (mut result, mut i) = (self.limbs[0] == 1u64, 1usize);
+        while i < N {
+            result = result && (self.limbs[i] == 0u64);
+            i += 1;
+        }
+        result
+    }
+
+    pub fn inv_mod(&self, modulus: &Self, mu: [u64; N + 1]) -> Option<Self> {
+        
+        // Using Fermat's Little Theorem: a^{p-2} mod p
+        let p_minus_two = {
+            let mut p_minus_two = modulus.clone();
+            let mut borrow: i128 = 2;
+            for i in 0..N {
+                let temp = p_minus_two.limbs[i] as i128 - borrow;
+                p_minus_two.limbs[i] = (temp + (if temp < 0 { 1 << 64 } else { 0 })) as u64;
+                borrow = if temp < 0 { 1 } else { 0 };
+            }
+            p_minus_two
+        };
+        let result = self.pow_mod(&p_minus_two, modulus, mu);
+
+        if self.mul_mod(&result, modulus, mu).is_one() {
+            Some(result)
+        } else {
+            None
+        }
+    }
+
+
+    pub fn ntt(input: &mut [Self], precompute: &NttPrecompute<N> , modulus: &Self, mu: &[u64; N + 1]) {
         let n = input.len();
         let mut len = 1;
+        let mut twiddle_idx = n / 2;
         while len < n {
             let half = len;
             len *= 2;
-            let mut w: Self = Self::from_limb(1u64);
+            twiddle_idx /= 2;
             for i in 0..half {
+                let w = precompute.twiddles[i * twiddle_idx];
                 let mut j = i;
                 while j < n {
-                    let temp = input[j + half].mul_mod(&w, modulus, Some(*mu));
+                    let temp = input[j + half].mul_mod(&w, modulus, *mu);
                     input[j + half] = input[j].sub_mod(&temp, modulus);
                     input[j] = input[j].add_mod(&temp, modulus);
                     j += len;
                 }
-                w = w.mul_mod(omega, modulus, Some(*mu)); // twiddle factor
             }
         }
     }
+
+    pub const fn cast_to<const M: usize>(self) -> BigField<M> {
+        let mut result = BigField::<M>::zero();
+        let mut i = 0;
+        let m = M;
+        let n = N;
+        let limit = std::cmp::min(n, m);
+        while i < limit {
+            result.limbs[i] = self.limbs[i];
+            i += 1;
+        }
+        result
+    }
 }
-
-
-
 
 
 impl<const N: usize> Ord for BigField<N> {
@@ -537,14 +688,13 @@ impl<const N: usize> FpComplex<N> {
         }
     }
 
-    pub fn mul_mod(&self, other: &Self, modulus: &BigField<N>, pre_mu: Option<[u64; N + 1]>) -> Self {
+    pub fn mul_mod(&self, other: &Self, modulus: &BigField<N>, mu: [u64; N + 1]) -> Self {
         let (sre, sim) = self.get_elements_ref();
         let (ore, oim) = other.get_elements_ref();
-        let mu = pre_mu.unwrap_or(BigField::<N>::precompute_mu(modulus));
-        let rr = sre.mul_mod(ore, modulus, Some(mu));
-        let ii = sim.mul_mod(oim, modulus, Some(mu));
+        let rr = sre.mul_mod(ore, modulus, mu);
+        let ii = sim.mul_mod(oim, modulus, mu);
         let re = rr.sub_mod(&ii, modulus);
-        let im = sre.mul_mod(oim, modulus, Some(mu)).add_mod(&sim.mul_mod(ore, modulus, Some(mu)), modulus);
+        let im = sre.mul_mod(oim, modulus, mu).add_mod(&sim.mul_mod(ore, modulus, mu), modulus);
         Self::new(re, im)
     }
 
@@ -564,13 +714,12 @@ impl<const N: usize> FpComplex<N> {
         Self::new(re, im)
     }
 
-    pub fn square_mod(&self, modulus: &BigField<N>, pre_mu: Option<[u64; N + 1]>) -> Self {
+    pub fn square_mod(&self, modulus: &BigField<N>, mu: [u64; N + 1]) -> Self {
         let (sre, sim) = self.get_elements_ref();
-        let mu = pre_mu.unwrap_or(BigField::precompute_mu(modulus));
-        let rr = sre.mul_mod(sre, modulus, Some(mu));
-        let ii = sim.mul_mod(sim, modulus, Some(mu));
+        let rr = sre.mul_mod(sre, modulus, mu);
+        let ii = sim.mul_mod(sim, modulus, mu);
         let re = rr.sub_mod(&ii, modulus);
-        let im = sre.mul_mod(sim, modulus, Some(mu)).mul_mod(&BigField::from_limb(2u64), modulus, Some(mu));
+        let im = sre.mul_mod(sim, modulus, mu).mul_mod(&BigField::from_limb(2u64), modulus, mu);
         Self::new(re, im)
     }
 
@@ -579,27 +728,463 @@ impl<const N: usize> FpComplex<N> {
         Self::new(re.neg_mod(modulus), im.neg_mod(modulus))
     }
 
-    pub fn norm_mod(&self, modulus: &BigField<N>, pre_mu: Option<[u64; N + 1]>) -> BigField<N> {
-        let mu = pre_mu.unwrap_or(BigField::precompute_mu(modulus));
-        let resq = self.re.square_mod(modulus, Some(mu));
-        let imsq = self.im.square_mod(modulus, Some(mu));
+    pub fn norm_mod(&self, modulus: &BigField<N>, mu: [u64; N + 1]) -> BigField<N> {
+        let resq = self.re.square_mod(modulus, mu);
+        let imsq = self.im.square_mod(modulus, mu);
         resq.add_mod(&imsq, modulus)
     }
 
-    pub fn inv_mod(&self, modulus: &BigField<N>, pre_mu: Option<[u64; N + 1]>) -> Self {
-        let mu = pre_mu.unwrap_or(BigField::precompute_mu(modulus));
-        let inv_norm = self.norm_mod(modulus, Some(mu)).inv_mod(modulus, Some(mu));
-        Self {
-            re: self.re.mul_mod(&inv_norm, modulus, Some(mu)),
-            im: modulus.sub_mod(&self.im.mul_mod(&inv_norm, modulus, Some(mu)), modulus)
-        }
+    pub fn inv_mod(&self, modulus: &BigField<N>, mu: [u64; N + 1]) -> Option<Self> {
+        if let Some(inv_norm) = self.norm_mod(modulus, mu).inv_mod(modulus, mu) {
+            Some(Self {
+                re: self.re.mul_mod(&inv_norm, modulus, mu),
+                im: modulus.sub_mod(&self.im.mul_mod(&inv_norm, modulus, mu), modulus)
+            })
+        } else {
+            None
+        }        
     }
 }
 
-#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-mod gpu;
+// Pre-computed twiddles for NTT
+pub struct NttPrecompute<const N: usize> {
+    twiddles: Vec<BigField<N>>,
+}
+
+impl<const N: usize> NttPrecompute<N> {
+    pub fn new(omega: &BigField<N>, size: usize, modulus: &BigField<N>, mu: [u64; N+1]) -> Self {
+        let mut twiddles = vec![BigField::from_limb(1u64); size / 2];
+        let mut current = omega.clone();
+        for i in 1..size / 2 {
+            twiddles[i] = current;
+            current = current.mul_mod(omega, modulus, mu);
+        }
+        Self { twiddles }
+    }
+}
+
 
 #[cfg(all(target_family = "wasm", target_os = "unknown"))]
 mod wasm_bench;
 #[cfg(all(target_family = "wasm", target_os = "unknown"))]
 pub use wasm_bench::*;
+
+
+
+#[cfg(test)]
+mod test {
+    use crate::BigField;
+
+    type Fp = BigField<7>;
+
+    /* 
+    fn get_modulus_and_mu() -> (Fp, [u64; 8]) {
+        let modulus = Fp::new([
+            0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFEFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64
+        ]);
+        let mu: [u64; 8] = Fp::precompute_mu(&modulus);
+        (modulus, mu)
+    }
+    */
+
+    #[test]
+    fn test_inv() {
+        let modulus = Fp::new([
+            0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFEFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64
+        ]);
+        let x = Fp::new([
+            7u64,
+            0u64,
+            0u64,
+            0u64,
+            0u64,
+            0u64,
+            0u64
+        ]);
+        let y = Fp::new([
+            5270498306774157604u64, 
+            2635249153387078802u64, 
+            10540996613548315209u64, 
+            13176245763867560228u64, 
+            15811494920322472813u64, 
+            7905747460161236406u64, 
+            13176245766935394011u64 
+        ]);
+        let mu = [
+            2u64,
+            0u64,
+            0u64,
+            4294967296u64,
+            0u64,
+            0u64,
+            0u64,
+            1u64
+        ];
+
+        let xy = x.mul_mod(&y, &modulus, mu);
+
+        if xy.is_one() {
+            println!(":) x * y mod p = 1")
+        } else {
+            panic!()
+        }
+
+    }
+
+    #[test]
+    fn test_sqrt() {
+        let modulus = Fp::new([
+            0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFEFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64
+        ]);
+        let y = Fp::new([
+            5270498306774157604u64, 
+            2635249153387078802u64, 
+            10540996613548315209u64, 
+            13176245763867560228u64, 
+            15811494920322472813u64, 
+            7905747460161236406u64, 
+            13176245766935394011u64 
+        ]);
+        let mu = [
+            2u64,
+            0u64,
+            0u64,
+            4294967296u64,
+            0u64,
+            0u64,
+            0u64,
+            1u64
+        ];
+
+        let y2 = y.square_mod(&modulus, mu);
+        if let Some(yp) = y2.sqrt_mod(&modulus, mu) {
+            if yp == y {
+                println!(":) sqrtmod(y^2 mod p, p) = y")
+            } else {
+                println!(":( sqrtmod(y^2 mod p, p) = [");
+                for i in 0..7 {
+                    let limb = yp.limbs[i];
+                    print!("\t{limb}");
+                    if i < 6 {
+                        println!(",");
+                    }
+                }
+                println!("]\n")
+            }
+        } else {
+            println!("X( sqrtmod(y^2 mod p, p)");
+            panic!()
+        }
+    }
+
+    #[test]
+    fn test_precompute_mu() {
+        let modulus = Fp::new([
+            0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFEFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64, 0xFFFFFFFFFFFFFFFFu64
+        ]);
+        let x = Fp::new([
+            7u64,
+            0u64,
+            0u64,
+            0u64,
+            0u64,
+            0u64,
+            0u64
+        ]);
+        let y = Fp::new([
+            5270498306774157604u64, 
+            2635249153387078802u64, 
+            10540996613548315209u64, 
+            13176245763867560228u64, 
+            15811494920322472813u64, 
+            7905747460161236406u64, 
+            13176245766935394011u64 
+        ]);
+        let mu: [u64; 8] = Fp::precompute_mu(&modulus);
+
+        let xy = x.mul_mod(&y, &modulus, mu);
+
+        if xy.is_one() {
+            println!(":) x * y mod p = 1")
+        } else {
+            println!("{mu:#?}");
+            panic!()
+        }
+
+    }
+
+    #[test]
+    fn test_shr() {
+        if Fp::new([
+            0u64,0u64,0u64,0u64,0u64,0u64,1
+        ]) >> 1 != Fp::new([
+            0u64,0u64,0u64,0u64,0u64,0x8000000000000000u64,0u64
+        ]) {
+            println!(":( x >> 1");
+            panic!()
+        }
+    }
+
+    #[test]
+    fn test_shl() {
+        if Fp::new([
+            0u64,0u64,0u64,0u64,0u64,0u64,1
+        ]) << 1 != Fp::new([
+            0u64,0u64,0u64,0u64,0u64,0u64,2u64
+        ]) {
+            println!(":( x << 1");
+            panic!()
+        }
+    }
+}
+
+#[inline(always)]
+const fn shl_helper(lhs: u64, rhs: usize) -> (u64, u64) {
+    if rhs == 0usize {
+        return (0u64, lhs);
+    } else if rhs < 64usize {
+        let carry = lhs >> (64usize - rhs);
+        return (carry, lhs << rhs);
+    } else {
+        return (lhs, 0u64);
+    }
+}
+
+#[inline(always)]
+const fn shr_helper(lhs: u64, rhs: usize) -> (u64, u64) {
+    if rhs == 0usize {
+        return (lhs, 0u64);
+    } else if rhs < 64usize {
+        let carry = lhs << (64usize - rhs);
+        return (lhs >> rhs, carry);
+    } else {
+        return (0u64, lhs);
+    }
+}
+
+impl<const N: usize> const Shl<usize> for BigField<N> {
+    type Output = Self;
+
+    fn shl(self, rhs: usize) -> Self::Output {
+        if rhs > 0 {
+            if rhs < 64 {
+                let mut pairs = [(0u64, 0u64); N];
+                let mut i = 0usize;
+                while i < N {
+                    pairs[i] = shl_helper(self.limbs[i], rhs);
+                    i += 1;
+                }
+                let mut result: Self = Self::zero();
+                result.limbs[0] = pairs[0].1;
+                i = 1;
+                pairs[N-1].0 = 0;
+                while i < N {
+                    result.limbs[i] = pairs[i].1 | pairs[i-1].0;
+                    i += 1;
+                }
+                result
+            } else {
+                let q = rhs / 64usize;
+                if q < N {
+                    let mut interm: Self = Self::zero();
+                    let mut i = 0usize;
+                    let r = rhs % 64usize;
+                    while i < N-q {
+                        interm.limbs[i+q] = self.limbs[i];
+                        i += 1;
+                    }
+                    interm << r
+                } else {
+                    Self::zero()
+                }
+            }
+        } else {
+            self
+        }
+    }
+}
+
+impl<const N: usize> const ShlAssign<usize> for BigField<N> {
+    fn shl_assign(&mut self, rhs: usize) {
+        if rhs > 0 {
+            if rhs < 64 {
+                let mut pairs = [(0u64, 0u64); N];
+                let mut i = 0usize;
+                while i < N {
+                    pairs[i] = shl_helper(self.limbs[i], rhs);
+                    i += 1;
+                }
+                self.limbs[0] = pairs[0].1;
+                i = 1;
+                pairs[N-1].0 = 0;
+                while i < N {
+                    self.limbs[i] = pairs[i].1 | pairs[i-1].0;
+                    i += 1;
+                }
+            } else {
+                let q = rhs / 64usize;
+                if q < N {
+                    let mut i = N-1usize;
+                    let r = rhs % 64usize;
+                    while i >= q {
+                        self.limbs[i] = self.limbs[i-q];
+                        i += 1;
+                    }
+                    *self <<= r;
+                } else {
+                    *self = Self::zero();
+                }
+            }
+        }
+    }
+}
+
+impl<const N: usize> const Shr<usize> for BigField<N> {
+    type Output = Self;
+
+    fn shr(self, rhs: usize) -> Self::Output {
+        if rhs > 0 {
+            if rhs < 64 {
+                let mut pairs = [(0u64, 0u64); N];
+                let mut i = 0usize;
+                while i < N {
+                    pairs[i] = shr_helper(self.limbs[i], rhs);
+                    i += 1;
+                }
+                let mut result: Self = Self::zero();
+                result.limbs[N-1] = pairs[N-1].0;
+                i = 0;
+                pairs[0].1 = 0;
+                while i < N-1 {
+                    result.limbs[i] = pairs[i].0 | pairs[i+1].1;
+                    i += 1;
+                }
+                result
+            } else {
+                let q = rhs / 64usize;
+                if q < N {
+                    let mut interm: Self = Self::zero();
+                    let mut i = 0usize;
+                    let r = rhs % 64usize;
+                    while i < N-q {
+                        interm.limbs[i] = self.limbs[i+q];
+                        i += 1;
+                    }
+                    interm >> r
+                } else {
+                    Self::zero()
+                }
+            }
+        } else {
+            self
+        }
+    }
+}
+
+impl<const N: usize> const ShrAssign<usize> for BigField<N> {
+    fn shr_assign(&mut self, rhs: usize) {
+        if rhs > 0 {
+            if rhs < 64 {
+                let mut pairs = [(0u64, 0u64); N];
+                let mut i = 0usize;
+                while i < N {
+                    pairs[i] = shr_helper(self.limbs[i], rhs);
+                    i += 1;
+                }
+                self.limbs[N-1] = pairs[N-1].0;
+                i = 0;
+                pairs[0].1 = 0;
+                while i < N-1 {
+                    self.limbs[i] = pairs[i].0 | pairs[i+1].1;
+                    i += 1;
+                }
+            } else {
+                let q = rhs / 64usize;
+                if q < N {
+                    let mut i = N-1usize;
+                    let r = rhs % 64usize;
+                    while i >= q {
+                        self.limbs[i-q] = self.limbs[i];
+                        i += 1;
+                    }
+                    *self >>= r;
+                } else {
+                    *self = Self::zero();
+                }
+            }
+        }
+    }
+}
+
+impl<const N: usize> const BitOr for BigField<N> {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        let mut result = Self::zero();
+        let mut i = 0;
+        while i < N {
+            result.limbs[i]  = self.limbs[i] | rhs.limbs[i];
+            i += 1;
+        }
+        result
+    }
+}
+
+impl<const N: usize> const BitXor for BigField<N> {
+    type Output = Self;
+
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        let mut result = Self::zero();
+        let mut i = 0;
+        while i < N {
+            result.limbs[i]  = self.limbs[i] ^ rhs.limbs[i];
+            i += 1;
+        }
+        result
+    }
+}
+
+impl<const N: usize> const BitAnd for BigField<N> {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        let mut result = Self::zero();
+        let mut i = 0;
+        while i < N {
+            result.limbs[i]  = self.limbs[i] & rhs.limbs[i];
+            i += 1;
+        }
+        result
+    }
+}
+
+
+impl<const N: usize> const BitOrAssign for BigField<N> {
+    fn bitor_assign(&mut self, rhs: Self) {
+        let mut i = 0;
+        while i < N {
+            self.limbs[i] |= rhs.limbs[i];
+            i += 1;
+        }
+    }
+}
+
+impl<const N: usize> const BitXorAssign for BigField<N> {
+    fn bitxor_assign(&mut self, rhs: Self) {
+        let mut i = 0;
+        while i < N {
+            self.limbs[i] ^= rhs.limbs[i];
+            i += 1;
+        }
+    }
+}
+
+impl<const N: usize> const BitAndAssign for BigField<N> {
+    fn bitand_assign(&mut self, rhs: Self) {
+        let mut i = 0;
+        while i < N {
+            self.limbs[i] &= rhs.limbs[i];
+            i += 1;
+        }
+    }
+}
