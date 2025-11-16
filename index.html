@@ -9,7 +9,7 @@
     <pre id="results"></pre>
 
     <script type="module">
-        import init, { FpBench, generate_random_limbs } from './pkg/cubemoma.js';
+        import init, { FpBench, generate_random_limbs, generate_omega } from './pkg/cubemoma.js';
 
         async function runBenchmark() {
             await init();
@@ -20,6 +20,7 @@
             const a_limbs = generate_random_limbs(42, 7);
             const b_limbs = generate_random_limbs(123, 7);
             const ntt_input = generate_random_limbs(456, 7 * 256);  // 256 elements
+            const inv_limbs = generate_omega();
 
             // mul_mod 벤치
             let start = performance.now();
@@ -38,6 +39,12 @@
             bench.bench_ntt(ntt_input);
             let ntt_time = performance.now() - start;
             results.innerText += `fp_ntt (n=256): ${ntt_time.toFixed(3)} ms\n`;
+
+            // inv 벤치
+            start = performance.now();
+            bench.bench_inv(inv_limbs);
+            let inv_time = performance.now() - start;
+            results.innerText += `fp_inv_mod: ${ntt_time.toFixed(3)} ms\n`;
         }
 
         window.runBenchmark = runBenchmark;
