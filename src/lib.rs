@@ -764,12 +764,16 @@ impl<const N: usize> FpComplex<N> {
         resq.add_mod(&imsq, modulus)
     }
 
+    pub fn conjugate_mod(&self, modulus: &BigField<N>) -> Self {
+        Self {
+            re: self.re,
+            im: self.im.neg_mod(modulus)
+        }
+    }
+
     pub fn inv_mod(&self, modulus: &BigField<N>, mu: [u64; N + 1]) -> Option<Self> {
         if let Some(inv_norm) = self.norm_mod(modulus, mu).inv_mod(modulus, mu) {
-            Some(Self {
-                re: self.re.mul_mod(&inv_norm, modulus, mu),
-                im: modulus.sub_mod(&self.im.mul_mod(&inv_norm, modulus, mu), modulus)
-            })
+            Some(self.conjugate_mod(modulus).mul_mod(&Self { re: inv_norm, im: BigField::zero() }, modulus, mu))
         } else {
             None
         }        
