@@ -37,10 +37,18 @@ impl Display for MoMAError {
 
 
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Clone, Copy)]
 pub struct BigField<const N: usize> {
     pub(crate) limbs: [Limb; N]
 }
+
+impl<const N: usize> const PartialEq for BigField<N> {
+    fn eq(&self, other: &Self) -> bool {
+        self.limbs == other.limbs
+    }
+}
+
+impl<const N: usize> const Eq for BigField<N> { }
 
 
 pub const trait PairSized<T1: Sized, T2: Sized> : Sized {
@@ -191,10 +199,13 @@ impl<const N: usize> BigField<N> {
     }
 
     // Helper: Compare multi-limb
-    fn cmp_multi(a: &[Limb; N], b: &[Limb; N]) -> std::cmp::Ordering {
-        for i in (0..N).rev() {
+    const fn cmp_multi(a: &[Limb; N], b: &[Limb; N]) -> std::cmp::Ordering {
+        let mut i1 = N;
+        while i1 > 0 {
+            let i = i1 -1;
             if a[i] > b[i] { return std::cmp::Ordering::Greater; }
             if a[i] < b[i] { return std::cmp::Ordering::Less; }
+            i1 = i;
         }
         std::cmp::Ordering::Equal
     }
@@ -652,18 +663,32 @@ impl<const N: usize> BigField<N> {
     }
 }
 
-
-impl<const N: usize> Ord for BigField<N> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        Self::cmp_multi(&self.limbs, &other.limbs)
+impl<const N: usize> const PartialOrd for BigField<N> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(Self::cmp_multi(&self.limbs, &other.limbs))
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl<const N: usize> const Ord for BigField<N> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct FpComplex<const N: usize> {
     re: BigField<N>,
     im: BigField<N>
 }
+
+impl<const N: usize> const PartialEq for FpComplex<N> {
+    fn eq(&self, other: &Self) -> bool {
+        self.re == other.re && self.im == other.im
+    }
+}
+
+impl<const N: usize> const Eq for FpComplex<N> { }
+
 
 impl<const N: usize> FpComplex<N> {
     #[inline(always)]
