@@ -122,6 +122,11 @@ const fn parse_le_bytes<const N: usize>(bytes: [u8; 8 * N]) -> [u64; N] {
 
 impl<const N: usize> BigField<N> {
     #[inline(always)]
+    pub const fn get_limbs(&self) -> [Limb; N] {
+        self.limbs
+    }
+
+    #[inline(always)]
     pub const fn new(limbs: [Limb; N]) -> Self {
         Self {
             limbs
