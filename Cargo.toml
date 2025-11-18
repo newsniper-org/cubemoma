@@ -1,6 +1,6 @@
 [package]
 name = "cubemoma"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2024"
 license = "BSD-2-Clause"
 description = "A multi-word modular arithmetic library based on CubeCL"
@@ -31,7 +31,6 @@ getrandom = { version = "0.3.4", features = ["std", "wasm_js"] }
 serde = { version = "1.0.228", features = ["std", "serde_derive", "derive"]}
 serde_json = { version = "1.0.145", features = ["std", "preserve_order"]}
 wasm-bindgen = { version = "0.2.105", features = ["std", "serde", "serde-serialize", "serde_json"] }
-
 
 [profile.bench]
 debug = false

@@ -778,6 +778,16 @@ impl<const N: usize> FpComplex<N> {
             None
         }        
     }
+
+    #[inline(always)]
+    pub const fn zero() -> Self {
+        Self::new(BigField::zero(), BigField::zero())
+    }
+
+    #[inline(always)]
+    pub const fn is_zero(&self) -> bool {
+        self.re.is_zero() && self.im.is_zero()
+    }
 }
 
 // Pre-computed twiddles for NTT
