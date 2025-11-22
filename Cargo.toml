@@ -1,6 +1,6 @@
 [package]
 name = "cubemoma"
-version = "0.0.7"
+version = "0.1.0"
 edition = "2024"
 license = "BSD-2-Clause"
 description = "A multi-word modular arithmetic library based on CubeCL"
@@ -22,9 +22,11 @@ name = "cpu_fp_ops"
 harness = false
 
 [features]
-default = ["cpu"]
+default = ["cpu", "random"]
 cpu = []
 gpu = []
+random = []
+wasm_benches = []
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { version = "0.3.4", features = ["std", "wasm_js"] }

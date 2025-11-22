@@ -86,12 +86,12 @@ ntt(&mut input, &precompute, &modulus, mu);
 
 Run `cargo bench` for CPU benchmarks. Example results (AMD Ryzen 7 5800H, Rust nightly-2025-10-01):
 
-- fp_add_mod: ~8.13 ns
-- fp_mul_mod: ~251.38 ns
-- fp_square_mod: ~252.90 ns
-- fp_repeated_mul_mod (1000): ~253.15 µs
-- fp_ntt (n=256): ~277.69 µs
-- fp_inv_mod (Fermat): ~223.33 µs
+- fp_add_mod: ~7.81 ns
+- fp_mul_mod: ~259.36 ns
+- fp_square_mod: ~252.92 ns
+- fp_repeated_mul_mod (1000): ~252.89 µs
+- fp_ntt (n=256): ~277.05 µs
+- fp_inv_mod (Fermat): ~222.88 µs
 
 WASM results (browser, post-optimization): mul_mod ~2 µs (from repeated), NTT ~2 ms – 8-10x faster than initial.
 

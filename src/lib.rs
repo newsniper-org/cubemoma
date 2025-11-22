@@ -146,8 +146,9 @@ impl<const N: usize> BigField<N> {
         Self { limbs: [0u64; N] }
     }
 
+    #[cfg(feature = "random")]
     #[inline(always)]
-    pub fn random<R: CryptoRng + ?Sized>(rng: &mut R) -> Self {
+    pub fn random<R: CryptoRng + Sized>(rng: &mut R) -> Self {
         let mut result = Self::zero();
         for limb in result.limbs.iter_mut() {
             *limb = rng.random::<u64>();
@@ -199,6 +200,7 @@ impl<const N: usize> BigField<N> {
     }
 
     // Helper: Compare multi-limb
+    #[inline(always)]
     const fn cmp_multi(a: &[Limb; N], b: &[Limb; N]) -> std::cmp::Ordering {
         let mut i1 = N;
         while i1 > 0 {
@@ -587,6 +589,7 @@ impl<const N: usize> BigField<N> {
         result
     }
 
+    #[inline(always)]
     pub const fn is_zero(&self) -> bool {
         let (mut result, mut i) = (true, 0usize);
         while i < N {
@@ -596,6 +599,7 @@ impl<const N: usize> BigField<N> {
         result
     }
 
+    #[inline(always)]
     pub const fn is_one(&self) -> bool {
         let (mut result, mut i) = (self.limbs[0] == 1u64, 1usize);
         while i < N {
@@ -649,6 +653,7 @@ impl<const N: usize> BigField<N> {
         }
     }
 
+    #[inline(always)]
     pub const fn cast_to<const M: usize>(self) -> BigField<M> {
         let mut result = BigField::<M>::zero();
         let mut i = 0;
@@ -659,6 +664,18 @@ impl<const N: usize> BigField<N> {
             result.limbs[i] = self.limbs[i];
             i += 1;
         }
+        result
+    }
+
+    #[inline(always)]
+    pub const fn flip(&self) -> Self {
+        let mut i = 0usize;
+        let mut result = Self::zero();
+        while i < N {
+            result.limbs[i] = self.limbs[i] ^ 0xFFFFFFFFFFFFFFFFu64;
+            i += 1;
+        }
+
         result
     }
 }
@@ -793,6 +810,14 @@ impl<const N: usize> FpComplex<N> {
     pub const fn is_zero(&self) -> bool {
         self.re.is_zero() && self.im.is_zero()
     }
+
+    #[cfg(feature = "random")]
+    #[inline(always)]
+    pub fn random<R: CryptoRng + Sized>(rng: &mut R) -> Self {
+        let re = BigField::<N>::random(rng);
+        let im = BigField::<N>::random(rng);
+        Self::new(re, im)
+    }
 }
 
 // Pre-computed twiddles for NTT
@@ -813,9 +838,9 @@ impl<const N: usize> NttPrecompute<N> {
 }
 
 
-#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+#[cfg(all(target_family = "wasm", target_os = "unknown", feature = "wasm_benches"))]
 mod wasm_bench;
-#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+#[cfg(all(target_family = "wasm", target_os = "unknown", feature = "wasm_benches"))]
 pub use wasm_bench::*;
 
 
@@ -1091,6 +1116,7 @@ impl<const N: usize> const ShlAssign<usize> for BigField<N> {
 impl<const N: usize> const Shr<usize> for BigField<N> {
     type Output = Self;
 
+    #[inline(always)]
     fn shr(self, rhs: usize) -> Self::Output {
         if rhs > 0 {
             if rhs < 64 {
@@ -1131,6 +1157,7 @@ impl<const N: usize> const Shr<usize> for BigField<N> {
 }
 
 impl<const N: usize> const ShrAssign<usize> for BigField<N> {
+    #[inline(always)]
     fn shr_assign(&mut self, rhs: usize) {
         if rhs > 0 {
             if rhs < 64 {
@@ -1168,6 +1195,7 @@ impl<const N: usize> const ShrAssign<usize> for BigField<N> {
 impl<const N: usize> const BitOr for BigField<N> {
     type Output = Self;
 
+    #[inline(always)]
     fn bitor(self, rhs: Self) -> Self::Output {
         let mut result = Self::zero();
         let mut i = 0;
@@ -1182,6 +1210,7 @@ impl<const N: usize> const BitOr for BigField<N> {
 impl<const N: usize> const BitXor for BigField<N> {
     type Output = Self;
 
+    #[inline(always)]
     fn bitxor(self, rhs: Self) -> Self::Output {
         let mut result = Self::zero();
         let mut i = 0;
@@ -1196,6 +1225,7 @@ impl<const N: usize> const BitXor for BigField<N> {
 impl<const N: usize> const BitAnd for BigField<N> {
     type Output = Self;
 
+    #[inline(always)]
     fn bitand(self, rhs: Self) -> Self::Output {
         let mut result = Self::zero();
         let mut i = 0;
@@ -1209,6 +1239,7 @@ impl<const N: usize> const BitAnd for BigField<N> {
 
 
 impl<const N: usize> const BitOrAssign for BigField<N> {
+    #[inline(always)]
     fn bitor_assign(&mut self, rhs: Self) {
         let mut i = 0;
         while i < N {
@@ -1219,6 +1250,7 @@ impl<const N: usize> const BitOrAssign for BigField<N> {
 }
 
 impl<const N: usize> const BitXorAssign for BigField<N> {
+    #[inline(always)]
     fn bitxor_assign(&mut self, rhs: Self) {
         let mut i = 0;
         while i < N {
@@ -1229,6 +1261,7 @@ impl<const N: usize> const BitXorAssign for BigField<N> {
 }
 
 impl<const N: usize> const BitAndAssign for BigField<N> {
+    #[inline(always)]
     fn bitand_assign(&mut self, rhs: Self) {
         let mut i = 0;
         while i < N {
