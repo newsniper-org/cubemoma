@@ -702,6 +702,11 @@ impl<const N: usize> FpComplex<N> {
     }
 
     #[inline(always)]
+    pub const fn get_elements_mut_ref(&mut self) -> (&mut BigField<N>, &mut BigField<N>) {
+        (&mut self.re, &mut self.im)
+    }
+
+    #[inline(always)]
     pub const fn get_real(&self) -> BigField<N> {
         self.get_elements().0
     }
