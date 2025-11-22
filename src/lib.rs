@@ -878,6 +878,29 @@ impl<const N: usize> FpComplex<N> {
         let exp = modulus.get_2x_minus_1_over_3();
         self.pow_mod(&exp, modulus, mu)
     }
+
+    pub fn sqrt_mod(&self, modulus: &BigField<N>, mu: [u64; N+1]) -> Option<Self> {
+        let (a, b) = (self.re, self.im);
+        if b.is_zero() {
+            return a.sqrt_mod(modulus, mu).map(|sqrt_a| Self::new(sqrt_a, BigField::zero()));
+        }
+        let gamma_sq = a.square_mod(modulus, mu).add_mod(&b.square_mod(modulus, mu), modulus);  // norm
+        let gamma = gamma_sq.sqrt_mod(modulus, mu)?;
+
+        let two = BigField::<N>::from_limb(2);
+        let two_inv = two.inv_mod(modulus, mu)?;
+
+        let alpha = gamma.add_mod(&a, modulus).mul_mod(&two_inv, modulus, mu);
+        let alpha_sq = alpha.sqrt_mod(modulus, mu)?;
+        let beta = gamma.sub_mod(&a, modulus).mul_mod(&two_inv, modulus, mu);
+        let beta_sq = beta.sqrt_mod(modulus, mu)?;
+        // sign 선택: check if 2 * alpha_sq * beta_sq == b.square()
+        if two.mul_mod(&alpha_sq, modulus, mu).mul_mod(&beta_sq, modulus, mu).sub_mod(&b, modulus).is_zero() {
+            Some(Self::new(alpha_sq, beta_sq))
+        } else {
+            Some(Self::new(alpha_sq, beta_sq.neg_mod(modulus)))
+        }
+    }
 }
 
 // Pre-computed twiddles for NTT
