@@ -249,7 +249,8 @@ impl<const N: usize> BigField<N> {
         result
     }
 
-    fn mod_multi(x: &mut [Limb; N], modulus: &[Limb; N], high: &mut Limb) {
+    #[inline(always)]
+    pub const fn mod_multi(x: &mut [Limb; N], modulus: &[Limb; N], high: &mut Limb) {
         loop {
             if *high > 0 {
                 Self::sub_multi(x, modulus, high);
@@ -281,12 +282,15 @@ impl<const N: usize> BigField<N> {
         Self::new(result)
     }
 
-    fn sub_multi(result: &mut [Limb; N], b: &[Limb; N], high: &mut Limb) {
+    #[inline(always)]
+    const fn sub_multi(result: &mut [Limb; N], b: &[Limb; N], high: &mut Limb) {
         let mut borrow: i128 = 0;
-        for i in 0..N {
+        let mut i = 0usize;
+        while i < N {
             let temp = result[i] as i128 - b[i] as i128 - borrow;
             result[i] = temp as Limb;
             borrow = if temp < 0 { 1 } else { 0 };
+            i += 1;
         }
         if borrow > 0 {
             *high -= 1;
@@ -678,6 +682,43 @@ impl<const N: usize> BigField<N> {
 
         result
     }
+
+    #[inline(always)]
+    pub(crate) const fn get_2x_minus_1_over_3(&self) -> Self where [(); N+1]: {
+        let r_limbs: [u64; N+1] = {
+            let mut tmp = self.cast_to::<{N+1}>();
+            tmp <<= 1usize;
+            let mut borrow = false;
+            (tmp.limbs[1], borrow) = tmp.limbs[0].borrowing_sub(1,borrow);
+            let mut i = 1usize;
+            while i < N {
+                (tmp.limbs[i+1], borrow) = tmp.limbs[i].borrowing_sub(0,borrow);
+                i += 1;
+            }
+            tmp.limbs
+        };
+        let s_limbs = {
+            let mut tmp = [0u64; N];
+            let mut i1 = N+1;
+            let mut rem = 0u64;
+            while i1 > 0 {
+                let i = i1 - 1;
+                let intemp = ((rem as u128) << 64) + r_limbs[i] as u128;
+                if i < N {
+                    tmp[i] = (intemp / 3) as u64;
+                }
+                rem = (intemp % 3) as u64;
+                i1 = i;
+            }
+            tmp
+        };
+        Self::new(s_limbs)
+    }
+
+    pub fn cbrt_mod_unchecked(&self, modulus: &Self, mu: [u64; N + 1]) -> Self {
+        let exp = modulus.get_2x_minus_1_over_3();
+        self.pow_mod(&exp, modulus, mu)
+    }
 }
 
 impl<const N: usize> const PartialOrd for BigField<N> {
@@ -817,6 +858,25 @@ impl<const N: usize> FpComplex<N> {
         let re = BigField::<N>::random(rng);
         let im = BigField::<N>::random(rng);
         Self::new(re, im)
+    }
+
+    pub fn pow_mod(&self, exp: &BigField<N>, modulus: &BigField<N>, mu: [u64; N + 1]) -> Self {
+        let mut result = Self::new(BigField::from_limb(1u64), BigField::zero());
+
+        for &limb in exp.limbs.iter().rev() {
+            for bit in (0..64).rev() {
+                result = result.square_mod(modulus, mu);
+                if limb & (1u64 << bit) != 0 {
+                    result = result.mul_mod(self, modulus, mu);
+                }
+            }
+        }
+        result
+    }
+
+    pub fn cbrt_mod_unchecked(&self, modulus: &BigField<N>, mu: [u64; N + 1]) -> Self {
+        let exp = modulus.get_2x_minus_1_over_3();
+        self.pow_mod(&exp, modulus, mu)
     }
 }
 
